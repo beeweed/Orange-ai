@@ -4,6 +4,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.tmp/
 frontend/node_modules/.tmp/
+*.tsbuildinfo
 *.log
 dev.log
 
