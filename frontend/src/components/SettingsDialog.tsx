@@ -125,6 +125,8 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               <div className="bg-[#363638] rounded-xl p-4">
                 <input
                   type="password"
+                  autoComplete="off"
+                  spellCheck={false}
                   placeholder={PROVIDERS.find((p) => p.id === s.provider)?.hint}
                   value={currentKey}
                   onChange={(e) =>
@@ -146,6 +148,8 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               <div className="bg-[#363638] rounded-xl p-4">
                 <input
                   type="password"
+                  autoComplete="off"
+                  spellCheck={false}
                   placeholder="e2b_..."
                   value={s.e2bApiKey}
                   onChange={(e) => s.setE2bApiKey(e.target.value)}
@@ -165,6 +169,8 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               <div className="bg-[#363638] rounded-xl p-4">
                 <input
                   type="text"
+                  autoComplete="off"
+                  spellCheck={false}
                   placeholder="e.g. base, or your custom template id"
                   value={s.sandboxTemplate}
                   onChange={(e) => s.setSandboxTemplate(e.target.value)}
