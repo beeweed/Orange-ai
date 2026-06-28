@@ -98,6 +98,7 @@ class Agent:
         messages.append({"role": "user", "content": user_message})
 
         recent_signatures: List[str] = []
+        tool_execution_context: Dict[str, Any] = {"read_files": set()}
         iteration = 0
 
         while iteration < self._max_iterations:
@@ -228,6 +229,7 @@ class Agent:
                         arguments,
                         sandbox_id=sandbox_id,
                         e2b_api_key=credentials.e2b_api_key,
+                        execution_context=tool_execution_context,
                     )
                 except SandboxError as exc:
                     result = {
@@ -282,4 +284,6 @@ class Agent:
             return f"create: {path}" if path else "create"
         if name == "file_read":
             return f"read: {path}" if path else "read"
+        if name == "file_editor":
+            return f"edit: {path}" if path else "edit"
         return name

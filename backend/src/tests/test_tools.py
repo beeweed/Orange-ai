@@ -12,6 +12,7 @@ import pytest
 
 from src.agent.agent import Agent
 from src.tools import TOOL_SCHEMAS, execute_tool
+from src.tools.edit_tool import FILE_EDITOR_SCHEMA, file_editor
 from src.tools.file_read import FILE_READ_SCHEMA, file_read
 from src.tools.file_write import FILE_WRITE_SCHEMA, file_write
 
@@ -35,7 +36,7 @@ class _StubSandbox:
 
 def test_tool_schemas_present():
     names = {s["function"]["name"] for s in TOOL_SCHEMAS}
-    assert names == {"file_write", "file_read"}
+    assert names == {"file_write", "file_read", "file_editor"}
 
 
 def test_file_write_schema_shape():
@@ -48,6 +49,12 @@ def test_file_read_schema_shape():
     fn = FILE_READ_SCHEMA["function"]
     assert fn["name"] == "file_read"
     assert fn["parameters"]["required"] == ["file_path"]
+
+
+def test_file_editor_schema_shape():
+    fn = FILE_EDITOR_SCHEMA["function"]
+    assert fn["name"] == "file_editor"
+    assert set(fn["parameters"]["required"]) == {"file_path", "old_string", "new_string"}
 
 
 def test_write_then_read_roundtrip():
@@ -78,6 +85,151 @@ def test_read_missing_returns_structured_error():
         )
         assert r["ok"] is False
         assert "could not read" in r["result"].lower()
+
+    asyncio.run(_run())
+
+
+def test_file_editor_requires_prior_read():
+    stub = _StubSandbox()
+
+    async def _run():
+        await file_write(
+            stub, sandbox_id="sb", e2b_api_key="k", file_path="/home/user/a.txt", content="hello",
+        )
+        result = await file_editor(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            read_files=set(),
+            file_path="/home/user/a.txt",
+            old_string="hello",
+            new_string="goodbye",
+        )
+        assert result["ok"] is False
+        assert "read this file first" in result["result"].lower()
+
+    asyncio.run(_run())
+
+
+def test_file_editor_exact_replace_after_read():
+    stub = _StubSandbox()
+
+    async def _run():
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="alpha\nbeta\ngamma",
+        )
+        result = await file_editor(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            read_files={"/home/user/a.txt"},
+            file_path="/home/user/a.txt",
+            old_string="beta",
+            new_string="delta",
+        )
+        assert result["ok"] is True
+        assert stub.store["/home/user/a.txt"] == "alpha\ndelta\ngamma"
+
+    asyncio.run(_run())
+
+
+def test_file_editor_multiple_matches_requires_replace_all():
+    stub = _StubSandbox()
+
+    async def _run():
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="x\nx\n",
+        )
+        result = await file_editor(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            read_files={"/home/user/a.txt"},
+            file_path="/home/user/a.txt",
+            old_string="x",
+            new_string="y",
+        )
+        assert result["ok"] is False
+        assert "multiple matches" in result["result"].lower()
+
+    asyncio.run(_run())
+
+
+def test_file_editor_old_string_missing_returns_error():
+    stub = _StubSandbox()
+
+    async def _run():
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="hello",
+        )
+        result = await file_editor(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            read_files={"/home/user/a.txt"},
+            file_path="/home/user/a.txt",
+            old_string="missing",
+            new_string="found",
+        )
+        assert result["ok"] is False
+        assert "was not found" in result["result"].lower()
+
+    asyncio.run(_run())
+
+
+def test_execute_tool_tracks_reads_for_editor():
+    stub = _StubSandbox()
+
+    async def _run():
+        context = {"read_files": set()}
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="before",
+        )
+
+        import src.tools as tools_mod
+
+        original = tools_mod.sandbox_service
+        tools_mod.sandbox_service = stub
+        try:
+            read_result = await execute_tool(
+                "file_read",
+                {"file_path": "/home/user/a.txt"},
+                sandbox_id="sb",
+                e2b_api_key="k",
+                execution_context=context,
+            )
+            assert read_result["ok"] is True
+            edit_result = await execute_tool(
+                "file_editor",
+                {
+                    "file_path": "/home/user/a.txt",
+                    "old_string": "before",
+                    "new_string": "after",
+                },
+                sandbox_id="sb",
+                e2b_api_key="k",
+                execution_context=context,
+            )
+            assert edit_result["ok"] is True
+            assert stub.store["/home/user/a.txt"] == "after"
+        finally:
+            tools_mod.sandbox_service = original
 
     asyncio.run(_run())
 
