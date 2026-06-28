@@ -161,7 +161,6 @@ export function useAgentRun() {
               break
             }
             case 'message_done':
-              liveContent = evt.content || liveContent
               flush(true)
               break
             case 'file_tree':
