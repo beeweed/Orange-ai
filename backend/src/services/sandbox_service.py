@@ -45,22 +45,15 @@ class SandboxService:
         api_key: str,
         template: Optional[str] = None,
     ) -> str:
-        """Create a new E2B sandbox and return its id.
-
-        Uses the official SDK signature: Sandbox.create(api_key, timeout, template).
-        """
+        """Create a new E2B sandbox and return its id."""
         timeout = self._settings.sandbox_timeout_seconds
 
         def _create() -> Sandbox:
-            kwargs = {"api_key": api_key, "timeout": timeout}
-            if template:
-                kwargs["template"] = template
-            # Support both the classmethod factory (newer SDK) and the direct
-            # constructor (e2b 1.0.x) so the official API works across versions.
-            factory = getattr(Sandbox, "create", None)
-            if callable(factory):
-                return factory(**kwargs)
-            return Sandbox(**kwargs)
+            return Sandbox.create(
+                api_key=api_key,
+                timeout=timeout,
+                template=template,
+            )
 
         try:
             sandbox = await asyncio.to_thread(_create)
