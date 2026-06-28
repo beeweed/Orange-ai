@@ -11,7 +11,7 @@ if (!raw) {
   )
 }
 
-export const BACKEND_URL = (raw || 'http://localhost:8000').replace(/\/$/, '')
+export const BACKEND_URL = (raw || '').replace(/\/$/, '')
 
 export const API = {
   health: `${BACKEND_URL}/api/health`,
