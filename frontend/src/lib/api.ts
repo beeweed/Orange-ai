@@ -1,5 +1,6 @@
-// API client: model listing, single-file read, sandbox file tree, kill, and the
-// streaming chat endpoint with a robust token-by-token SSE reader.
+// API client: model listing, single-file read, sandbox file tree, sandbox
+// lifecycle controls, and the streaming chat endpoint with a robust token-by-
+// token SSE reader.
 
 import { API } from './config'
 import type { AgentEvent, FileNode, ModelInfo, Provider } from '../types'
@@ -22,6 +23,19 @@ export interface StreamPayload {
   sandbox_id?: string | null
 }
 
+export interface SandboxLifecycleResponse {
+  sandbox_id: string
+  state: 'running' | 'paused'
+  end_at: string | null
+  timeout_seconds: number
+  status?: 'running' | 'paused' | 'killed'
+}
+
+async function parseError(resp: Response, fallback: string): Promise<Error> {
+  const err = await resp.json().catch(() => ({}))
+  return new Error(err.detail || fallback)
+}
+
 export async function fetchModels(provider: Provider, apiKey: string): Promise<ModelInfo[]> {
   const resp = await fetch(API.models, {
     method: 'POST',
@@ -29,11 +43,55 @@ export async function fetchModels(provider: Provider, apiKey: string): Promise<M
     body: JSON.stringify({ provider, api_key: apiKey }),
   })
   if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}))
-    throw new Error(err.detail || `Failed to fetch models (${resp.status})`)
+    throw await parseError(resp, `Failed to fetch models (${resp.status})`)
   }
   const data = await resp.json()
   return data.models as ModelInfo[]
+}
+
+export async function fetchSandboxStatus(
+  sandboxId: string,
+  e2bApiKey: string,
+): Promise<SandboxLifecycleResponse> {
+  const resp = await fetch(API.sandboxStatus, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sandbox_id: sandboxId, e2b_api_key: e2bApiKey }),
+  })
+  if (!resp.ok) {
+    throw await parseError(resp, `Failed to inspect sandbox (${resp.status})`)
+  }
+  return (await resp.json()) as SandboxLifecycleResponse
+}
+
+export async function pauseSandbox(
+  sandboxId: string,
+  e2bApiKey: string,
+): Promise<SandboxLifecycleResponse> {
+  const resp = await fetch(API.sandboxPause, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sandbox_id: sandboxId, e2b_api_key: e2bApiKey }),
+  })
+  if (!resp.ok) {
+    throw await parseError(resp, `Failed to pause sandbox (${resp.status})`)
+  }
+  return (await resp.json()) as SandboxLifecycleResponse
+}
+
+export async function resumeSandbox(
+  sandboxId: string,
+  e2bApiKey: string,
+): Promise<SandboxLifecycleResponse> {
+  const resp = await fetch(API.sandboxResume, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sandbox_id: sandboxId, e2b_api_key: e2bApiKey }),
+  })
+  if (!resp.ok) {
+    throw await parseError(resp, `Failed to resume sandbox (${resp.status})`)
+  }
+  return (await resp.json()) as SandboxLifecycleResponse
 }
 
 export async function fetchFileTree(
@@ -61,8 +119,7 @@ export async function readFile(
     body: JSON.stringify({ sandbox_id: sandboxId, e2b_api_key: e2bApiKey, file_path: filePath }),
   })
   if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}))
-    throw new Error(err.detail || `Failed to read file (${resp.status})`)
+    throw await parseError(resp, `Failed to read file (${resp.status})`)
   }
   const data = await resp.json()
   return data.content as string
@@ -86,8 +143,7 @@ export async function streamChat(
   })
 
   if (!resp.ok || !resp.body) {
-    const err = await resp.json().catch(() => ({}))
-    throw new Error(err.detail || `Stream failed (${resp.status})`)
+    throw await parseError(resp, `Stream failed (${resp.status})`)
   }
 
   const reader = resp.body.getReader()

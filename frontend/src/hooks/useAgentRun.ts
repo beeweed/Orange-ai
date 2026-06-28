@@ -120,6 +120,8 @@ export function useAgentRun() {
             case 'sandbox_created':
             case 'sandbox_ready':
               a.setSandboxId(evt.sandbox_id)
+              a.setSandboxStatus('running')
+              a.setSandboxStatusError(null)
               useConversationStore.getState().setSandboxId(cid, evt.sandbox_id)
               a.setPhase('thinking')
               break
@@ -168,6 +170,9 @@ export function useAgentRun() {
               break
             case 'error':
               a.setError(evt.message)
+              if (evt.message.toLowerCase().includes('sandbox is paused')) {
+                a.setSandboxStatus('paused')
+              }
               liveContent += liveContent
                 ? `\n\n> Error: ${evt.message}`
                 : `> Error: ${evt.message}`
@@ -182,7 +187,11 @@ export function useAgentRun() {
       )
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown streaming error'
-      useAgentStore.getState().setError(message)
+      const liveAgent = useAgentStore.getState()
+      liveAgent.setError(message)
+      if (message.toLowerCase().includes('sandbox is paused')) {
+        liveAgent.setSandboxStatus('paused')
+      }
       liveContent += liveContent ? `\n\n> Error: ${message}` : `> Error: ${message}`
       flush(true)
     } finally {

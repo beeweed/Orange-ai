@@ -46,12 +46,14 @@ function langLabel(name: string): string {
 export function CodePanel({ requestedPath, onConsumeRequest }: Props) {
   const fileTree = useAgentStore((s) => s.fileTree)
   const sandboxId = useAgentStore((s) => s.sandboxId)
+  const sandboxState = useAgentStore((s) => s.sandboxState)
   const setFileTree = useAgentStore((s) => s.setFileTree)
   const e2bApiKey = useSettingsStore((s) => s.e2bApiKey)
 
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const sandboxPaused = sandboxState === 'paused'
 
   const openFile = async (path: string) => {
     setActivePath(path)
@@ -59,11 +61,23 @@ export function CodePanel({ requestedPath, onConsumeRequest }: Props) {
       if (prev.some((t) => t.path === path)) return prev
       return [...prev, { path, content: '', loading: true }]
     })
+
+    if (sandboxPaused) {
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.path === path
+            ? { ...t, loading: false, error: 'Sandbox is paused. Resume it to read files.' }
+            : t,
+        ),
+      )
+      return
+    }
+
     if (!sandboxId || !e2bApiKey) return
     try {
       const content = await readFile(sandboxId, e2bApiKey, path)
       setTabs((prev) =>
-        prev.map((t) => (t.path === path ? { ...t, content, loading: false } : t)),
+        prev.map((t) => (t.path === path ? { ...t, content, loading: false, error: undefined } : t)),
       )
     } catch (err) {
       setTabs((prev) =>
@@ -96,7 +110,7 @@ export function CodePanel({ requestedPath, onConsumeRequest }: Props) {
   }
 
   const refreshTree = async () => {
-    if (!sandboxId || !e2bApiKey) return
+    if (!sandboxId || !e2bApiKey || sandboxPaused) return
     setRefreshing(true)
     try {
       const files = await fetchFileTree(sandboxId, e2bApiKey)
@@ -124,8 +138,9 @@ export function CodePanel({ requestedPath, onConsumeRequest }: Props) {
           </div>
           <button
             onClick={refreshTree}
-            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
-            title="Refresh files"
+            disabled={sandboxPaused}
+            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+            title={sandboxPaused ? 'Resume the sandbox to refresh files' : 'Refresh files'}
           >
             <RefreshIcon className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
           </button>
@@ -230,7 +245,11 @@ export function CodePanel({ requestedPath, onConsumeRequest }: Props) {
             <span>UTF-8</span>
           </div>
           <div className="flex items-center gap-4">
-            <span>{sandboxId ? `Sandbox: ${sandboxId.slice(0, 10)}…` : 'No sandbox'}</span>
+            <span>
+              {sandboxId
+                ? `Sandbox: ${sandboxId.slice(0, 10)}…${sandboxPaused ? ' · paused' : ''}`
+                : 'No sandbox'}
+            </span>
           </div>
         </div>
       </div>

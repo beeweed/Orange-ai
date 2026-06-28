@@ -1,0 +1,7 @@
+{
+  "name": "orange-ai-workspace",
+  "private": true,
+  "scripts": {
+    "build:local": "bash -lc 'cd frontend && npm run build && cd ../backend && . .venv/bin/activate && python -m pytest src/tests -q'"
+  }
+}

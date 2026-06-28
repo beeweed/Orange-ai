@@ -32,6 +32,18 @@ export const RefreshIcon = (p: IconProps) => (
   </svg>
 )
 
+export const PauseIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M10 5v14M14 5v14" />
+  </svg>
+)
+
+export const PlayIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M8 5v14l11-7-11-7z" />
+  </svg>
+)
+
 export const UserIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />

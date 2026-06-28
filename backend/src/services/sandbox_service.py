@@ -1,14 +1,18 @@
 """E2B Sandbox service.
 
-Wraps the official E2B SDK to create and reuse isolated sandboxes, and to
-perform file read / write operations inside them. All blocking SDK calls are
-executed in a thread pool so the asyncio event loop is never blocked.
+Wraps the official E2B SDK to create, inspect, pause, resume, and reuse isolated
+sandboxes, and to perform file read / write operations inside them. All blocking
+SDK calls are executed in a thread pool so the asyncio event loop is never
+blocked.
 
 Design notes:
 - A new sandbox is created lazily on a user's first message of a session.
 - Sandboxes are keyed by their E2B sandbox id and cached in-process so the same
   session can reuse one sandbox across multiple agent turns.
 - Timeout is set to 1 hour (configurable) as required.
+- Sandboxes are configured to pause on timeout so they can be resumed later.
+- Manual resume explicitly resets the timeout window back to the full configured
+  duration.
 """
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ import asyncio
 from typing import Dict, Optional
 
 from e2b import Sandbox
+from e2b.sandbox.sandbox_api import SandboxInfo
 
 from src.config.settings import get_settings
 from src.utils.logger import get_logger
@@ -25,6 +30,10 @@ logger = get_logger(__name__)
 
 class SandboxError(Exception):
     """Raised when a sandbox operation fails."""
+
+
+class SandboxPausedError(SandboxError):
+    """Raised when a sandbox is paused and requires an explicit resume."""
 
 
 class SandboxService:
@@ -38,7 +47,30 @@ class SandboxService:
     def __init__(self) -> None:
         self._settings = get_settings()
         self._sandboxes: Dict[str, Sandbox] = {}
+        self._paused_sandboxes: set[str] = set()
         self._lock = asyncio.Lock()
+
+    def _timeout_seconds(self) -> int:
+        return self._settings.sandbox_timeout_seconds
+
+    def _lifecycle_config(self) -> dict:
+        return {
+            "on_timeout": "pause",
+            "auto_resume": False,
+        }
+
+    async def _set_paused_state(self, sandbox_id: str, paused: bool) -> None:
+        async with self._lock:
+            if paused:
+                self._paused_sandboxes.add(sandbox_id)
+            else:
+                self._paused_sandboxes.discard(sandbox_id)
+
+    async def _cache_running_sandbox(self, sandbox: Sandbox) -> Sandbox:
+        async with self._lock:
+            self._sandboxes[sandbox.sandbox_id] = sandbox
+            self._paused_sandboxes.discard(sandbox.sandbox_id)
+        return sandbox
 
     async def create_sandbox(
         self,
@@ -46,13 +78,15 @@ class SandboxService:
         template: Optional[str] = None,
     ) -> str:
         """Create a new E2B sandbox and return its id."""
-        timeout = self._settings.sandbox_timeout_seconds
+        timeout = self._timeout_seconds()
+        lifecycle = self._lifecycle_config()
 
         def _create() -> Sandbox:
             return Sandbox.create(
                 api_key=api_key,
                 timeout=timeout,
                 template=template,
+                lifecycle=lifecycle,
             )
 
         try:
@@ -61,22 +95,30 @@ class SandboxService:
             logger.error("Failed to create E2B sandbox: %s", exc)
             raise SandboxError(f"Failed to create sandbox: {exc}") from exc
 
-        sandbox_id = sandbox.sandbox_id
-        async with self._lock:
-            self._sandboxes[sandbox_id] = sandbox
-        logger.info("Created sandbox %s (timeout=%ss, template=%s)", sandbox_id, timeout, template or "default")
-        return sandbox_id
+        await self._cache_running_sandbox(sandbox)
+        logger.info(
+            "Created sandbox %s (timeout=%ss, template=%s, lifecycle=%s)",
+            sandbox.sandbox_id,
+            timeout,
+            template or "default",
+            lifecycle,
+        )
+        return sandbox.sandbox_id
 
-    async def _get_sandbox(self, sandbox_id: str, api_key: str) -> Sandbox:
-        """Return a connected sandbox, reconnecting from cache or by id."""
-        async with self._lock:
-            cached = self._sandboxes.get(sandbox_id)
-        if cached is not None:
-            return cached
+    async def _connect_sandbox(
+        self,
+        sandbox_id: str,
+        api_key: str,
+        *,
+        timeout: Optional[int] = None,
+    ) -> Sandbox:
+        """Connect to a sandbox and cache the running instance.
 
-        # Reconnect to an existing running sandbox (e.g. after process restart).
+        If the sandbox is paused, E2B resumes it when connecting.
+        """
+
         def _connect() -> Sandbox:
-            return Sandbox.connect(sandbox_id, api_key=api_key)
+            return Sandbox.connect(sandbox_id, api_key=api_key, timeout=timeout)
 
         try:
             sandbox = await asyncio.to_thread(_connect)
@@ -84,9 +126,76 @@ class SandboxService:
             logger.error("Failed to connect to sandbox %s: %s", sandbox_id, exc)
             raise SandboxError(f"Sandbox {sandbox_id} is not reachable: {exc}") from exc
 
-        async with self._lock:
-            self._sandboxes[sandbox_id] = sandbox
+        await self._cache_running_sandbox(sandbox)
         return sandbox
+
+    async def _get_sandbox(self, sandbox_id: str, api_key: str) -> Sandbox:
+        """Return a connected running sandbox instance.
+
+        Paused sandboxes are intentionally not auto-resumed by file operations.
+        They must be resumed explicitly through the resume API so the UI stays in
+        sync with the user's chosen lifecycle action.
+        """
+        async with self._lock:
+            if sandbox_id in self._paused_sandboxes:
+                raise SandboxPausedError("Sandbox is paused. Resume it to continue.")
+            cached = self._sandboxes.get(sandbox_id)
+        if cached is not None:
+            return cached
+
+        return await self._connect_sandbox(sandbox_id, api_key)
+
+    async def get_info(self, sandbox_id: str, api_key: str) -> SandboxInfo:
+        """Fetch sandbox metadata without changing its lifecycle state."""
+
+        def _get_info() -> SandboxInfo:
+            return Sandbox.get_info(sandbox_id, api_key=api_key)
+
+        try:
+            info = await asyncio.to_thread(_get_info)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to inspect sandbox %s: %s", sandbox_id, exc)
+            raise SandboxError(f"Sandbox {sandbox_id} is not reachable: {exc}") from exc
+
+        await self._set_paused_state(sandbox_id, info.state.value == "paused")
+        return info
+
+    async def pause(self, sandbox_id: str, api_key: str) -> SandboxInfo:
+        """Pause a sandbox while preserving memory and filesystem state."""
+
+        def _pause() -> bool:
+            return Sandbox.pause(sandbox_id, api_key=api_key, keep_memory=True)
+
+        try:
+            await asyncio.to_thread(_pause)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to pause sandbox %s: %s", sandbox_id, exc)
+            raise SandboxError(f"Failed to pause sandbox {sandbox_id}: {exc}") from exc
+
+        await self._set_paused_state(sandbox_id, True)
+        logger.info("Paused sandbox %s", sandbox_id)
+        return await self.get_info(sandbox_id, api_key)
+
+    async def resume(self, sandbox_id: str, api_key: str) -> SandboxInfo:
+        """Resume a sandbox and reset its timeout back to the full configured window."""
+        timeout = self._timeout_seconds()
+        sandbox = await self._connect_sandbox(sandbox_id, api_key, timeout=timeout)
+
+        def _reset_timeout_and_get_info() -> SandboxInfo:
+            # E2B connect() resumes the sandbox. We then call set_timeout() so the
+            # new 1-hour window starts from the moment the user explicitly resumes.
+            sandbox.set_timeout(timeout)
+            return sandbox.get_info()
+
+        try:
+            info = await asyncio.to_thread(_reset_timeout_and_get_info)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to reset timeout for sandbox %s on resume: %s", sandbox_id, exc)
+            raise SandboxError(f"Failed to resume sandbox {sandbox_id}: {exc}") from exc
+
+        await self._cache_running_sandbox(sandbox)
+        logger.info("Resumed sandbox %s and reset timeout to %ss", sandbox_id, timeout)
+        return info
 
     async def write_file(
         self,
@@ -164,19 +273,19 @@ class SandboxService:
 
     async def kill(self, sandbox_id: str, api_key: str) -> None:
         """Terminate a sandbox and evict it from the cache."""
-        async with self._lock:
-            sandbox = self._sandboxes.pop(sandbox_id, None)
-        if sandbox is None:
-            return
 
-        def _kill() -> None:
-            sandbox.kill()
+        def _kill() -> bool:
+            return Sandbox.kill(sandbox_id, api_key=api_key)
 
         try:
             await asyncio.to_thread(_kill)
             logger.info("Killed sandbox %s", sandbox_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to kill sandbox %s: %s", sandbox_id, exc)
+        finally:
+            async with self._lock:
+                self._sandboxes.pop(sandbox_id, None)
+                self._paused_sandboxes.discard(sandbox_id)
 
 
 # Module-level singleton used across the application.

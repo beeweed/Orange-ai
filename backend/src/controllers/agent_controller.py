@@ -43,6 +43,11 @@ class AgentController:
                 )
                 yield sse_event("sandbox_created", {"sandbox_id": sandbox_id})
             else:
+                info = await sandbox_service.get_info(sandbox_id, creds.e2b_api_key)
+                if info.state.value == "paused":
+                    yield sse_event("error", {"message": "Sandbox is paused. Resume it to continue."})
+                    yield sse_event("done", {"iterations": 0})
+                    return
                 yield sse_event("sandbox_ready", {"sandbox_id": sandbox_id})
         except SandboxError as exc:
             yield sse_event("error", {"message": f"Sandbox initialisation failed: {exc}"})

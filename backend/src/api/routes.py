@@ -1,13 +1,16 @@
 """HTTP API routes.
 
 Exposes:
-- GET  /api/health        : liveness probe
-- GET  /api/ready         : readiness probe
-- POST /api/models        : list provider models (validates the api key)
-- POST /api/chat/stream   : run one autonomous agent turn (SSE stream)
-- POST /api/sandbox/files : fetch the current sandbox file tree
-- POST /api/sandbox/file  : read a single file's raw content (for the editor)
-- POST /api/sandbox/kill  : terminate a sandbox
+- GET  /api/health          : liveness probe
+- GET  /api/ready           : readiness probe
+- POST /api/models          : list provider models (validates the api key)
+- POST /api/chat/stream     : run one autonomous agent turn (SSE stream)
+- POST /api/sandbox/files   : fetch the current sandbox file tree
+- POST /api/sandbox/file    : read a single file's raw content (for the editor)
+- POST /api/sandbox/status  : inspect the current sandbox lifecycle state
+- POST /api/sandbox/pause   : pause a sandbox
+- POST /api/sandbox/resume  : resume a sandbox and reset timeout
+- POST /api/sandbox/kill    : terminate a sandbox
 """
 from __future__ import annotations
 
@@ -21,7 +24,6 @@ from src.schemas.chat import (
     ChatRequest,
     ModelsRequest,
     ModelsResponse,
-    Provider,
 )
 from src.services.llm_service import LLMError, llm_service
 from src.services.sandbox_service import SandboxError, sandbox_service
@@ -102,13 +104,56 @@ async def sandbox_file(req: SandboxFileRequest) -> dict:
     return {"file_path": req.file_path, "content": content}
 
 
-class SandboxKillRequest(BaseModel):
+class SandboxLifecycleRequest(BaseModel):
     sandbox_id: str = Field(min_length=1)
     e2b_api_key: str = Field(min_length=1)
 
 
+def _status_payload(info) -> dict:
+    return {
+        "sandbox_id": info.sandbox_id,
+        "state": info.state.value,
+        "end_at": info.end_at.isoformat() if info.end_at else None,
+        "timeout_seconds": settings.sandbox_timeout_seconds,
+    }
+
+
+@router.post("/sandbox/status")
+async def sandbox_status(req: SandboxLifecycleRequest) -> dict:
+    """Inspect the current sandbox lifecycle state without mutating it."""
+    try:
+        info = await sandbox_service.get_info(req.sandbox_id, req.e2b_api_key)
+    except SandboxError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return _status_payload(info)
+
+
+@router.post("/sandbox/pause")
+async def sandbox_pause(req: SandboxLifecycleRequest) -> dict:
+    """Pause a sandbox while preserving its state."""
+    try:
+        info = await sandbox_service.pause(req.sandbox_id, req.e2b_api_key)
+    except SandboxError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    payload = _status_payload(info)
+    payload["status"] = "paused"
+    return payload
+
+
+@router.post("/sandbox/resume")
+async def sandbox_resume(req: SandboxLifecycleRequest) -> dict:
+    """Resume a sandbox and reset its timeout back to the configured window."""
+    try:
+        info = await sandbox_service.resume(req.sandbox_id, req.e2b_api_key)
+    except SandboxError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    payload = _status_payload(info)
+    payload["status"] = "running"
+    return payload
+
+
 @router.post("/sandbox/kill")
-async def sandbox_kill(req: SandboxKillRequest) -> dict:
+async def sandbox_kill(req: SandboxLifecycleRequest) -> dict:
     """Terminate a sandbox."""
     await sandbox_service.kill(req.sandbox_id, req.e2b_api_key)
     return {"status": "killed", "sandbox_id": req.sandbox_id}

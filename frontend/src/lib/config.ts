@@ -19,5 +19,8 @@ export const API = {
   chatStream: `${BACKEND_URL}/api/chat/stream`,
   sandboxFiles: `${BACKEND_URL}/api/sandbox/files`,
   sandboxFile: `${BACKEND_URL}/api/sandbox/file`,
+  sandboxStatus: `${BACKEND_URL}/api/sandbox/status`,
+  sandboxPause: `${BACKEND_URL}/api/sandbox/pause`,
+  sandboxResume: `${BACKEND_URL}/api/sandbox/resume`,
   sandboxKill: `${BACKEND_URL}/api/sandbox/kill`,
 } as const
