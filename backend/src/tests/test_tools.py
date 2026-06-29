@@ -89,7 +89,7 @@ def test_read_missing_returns_structured_error():
     asyncio.run(_run())
 
 
-def test_file_editor_requires_prior_read():
+def test_file_editor_auto_reads_when_not_read_before():
     stub = _StubSandbox()
 
     async def _run():
@@ -100,13 +100,12 @@ def test_file_editor_requires_prior_read():
             stub,
             sandbox_id="sb",
             e2b_api_key="k",
-            read_files=set(),
             file_path="/home/user/a.txt",
             old_string="hello",
             new_string="goodbye",
         )
-        assert result["ok"] is False
-        assert "read this file first" in result["result"].lower()
+        assert result["ok"] is True
+        assert stub.store["/home/user/a.txt"] == "goodbye"
 
     asyncio.run(_run())
 
@@ -126,7 +125,6 @@ def test_file_editor_exact_replace_after_read():
             stub,
             sandbox_id="sb",
             e2b_api_key="k",
-            read_files={"/home/user/a.txt"},
             file_path="/home/user/a.txt",
             old_string="beta",
             new_string="delta",
@@ -152,7 +150,6 @@ def test_file_editor_multiple_matches_requires_replace_all():
             stub,
             sandbox_id="sb",
             e2b_api_key="k",
-            read_files={"/home/user/a.txt"},
             file_path="/home/user/a.txt",
             old_string="x",
             new_string="y",
@@ -178,7 +175,6 @@ def test_file_editor_old_string_missing_returns_error():
             stub,
             sandbox_id="sb",
             e2b_api_key="k",
-            read_files={"/home/user/a.txt"},
             file_path="/home/user/a.txt",
             old_string="missing",
             new_string="found",

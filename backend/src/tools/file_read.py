@@ -9,33 +9,20 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from src.services.sandbox_service import SandboxError, SandboxService
+from src.tools.schemas import FileReadParams, pydantic_to_openai_schema
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Exact native tool schema as specified in the requirements.
-FILE_READ_SCHEMA: Dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "file_read",
-        "description": "Read the content of an existing file from the sandbox. Returns content with line numbers.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Absolute path starting with /home/user/. Example: /home/user/project/src/main.py",
-                },
-            },
-            "required": ["file_path"],
-        },
-    },
-}
+FILE_READ_SCHEMA: Dict[str, Any] = pydantic_to_openai_schema(
+    name="file_read",
+    description="Read the content of an existing file from the sandbox. Returns content with line numbers.",
+    params_model=FileReadParams,
+)
 
 
-def _with_line_numbers(text: str) -> str:
+def _with_line_numbers(lines: list[str]) -> str:
     """Prefix each line with a 1-based, right-aligned line number."""
-    lines = text.splitlines()
     if not lines:
         return ""
     width = len(str(len(lines)))
@@ -50,10 +37,12 @@ async def file_read(
     file_path: str,
 ) -> Dict[str, Any]:
     """Read `file_path` from the sandbox and return numbered content."""
-    if not isinstance(file_path, str) or not file_path.strip():
+    try:
+        FileReadParams(file_path=file_path)
+    except Exception as exc:
         return {
             "ok": False,
-            "result": "Error: 'file_path' is required and must be a non-empty string.",
+            "result": f"Error: invalid parameters: {exc}",
             "meta": {"tool": "file_read"},
         }
 
@@ -67,13 +56,14 @@ async def file_read(
             "meta": {"tool": "file_read", "file_path": file_path},
         }
 
-    numbered = _with_line_numbers(content)
+    lines = content.splitlines()
+    numbered = _with_line_numbers(lines)
     return {
         "ok": True,
         "result": numbered if numbered else "(file is empty)",
         "meta": {
             "tool": "file_read",
             "file_path": file_path,
-            "lines": len(content.splitlines()),
+            "lines": len(lines),
         },
     }

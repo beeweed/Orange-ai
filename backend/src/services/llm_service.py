@@ -144,8 +144,6 @@ class LLMService:
         }
         if tools:
             body["tools"] = tools
-            body["tool_calls"] = None  # let the model decide
-            body.pop("tool_calls")
             body["tool_choice"] = "auto"
 
         # Accumulator for streamed tool calls keyed by their index.

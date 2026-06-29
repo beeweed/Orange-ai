@@ -8,32 +8,16 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from src.services.sandbox_service import SandboxError, SandboxService
+from src.tools.schemas import FileWriteParams, pydantic_to_openai_schema
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Exact native tool schema as specified in the requirements.
-FILE_WRITE_SCHEMA: Dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "file_write",
-        "description": "Create or overwrite a file at the given path inside the sandbox. Use for creating new files or fully rewriting existing ones.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Absolute path starting with /home/user/. Example: /home/user/project/src/App.tsx",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The full content to write to the file.",
-                },
-            },
-            "required": ["file_path", "content"],
-        },
-    },
-}
+FILE_WRITE_SCHEMA: Dict[str, Any] = pydantic_to_openai_schema(
+    name="file_write",
+    description="Create or overwrite a file at the given path inside the sandbox. Use for creating new files or fully rewriting existing ones.",
+    params_model=FileWriteParams,
+)
 
 
 async def file_write(
@@ -49,17 +33,13 @@ async def file_write(
     Returns a structured result. On failure, returns a structured error string
     so the agent can continue its loop and self-correct.
     """
-    if not isinstance(file_path, str) or not file_path.strip():
+    try:
+        FileWriteParams(file_path=file_path, content=content)
+    except Exception as exc:
         return {
             "ok": False,
-            "result": "Error: 'file_path' is required and must be a non-empty string.",
+            "result": f"Error: invalid parameters: {exc}",
             "meta": {"tool": "file_write"},
-        }
-    if not isinstance(content, str):
-        return {
-            "ok": False,
-            "result": "Error: 'content' must be a string.",
-            "meta": {"tool": "file_write", "file_path": file_path},
         }
 
     try:

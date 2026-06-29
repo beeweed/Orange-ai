@@ -6,45 +6,16 @@ make targeted, reviewable edits instead of blindly overwriting content.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable
+from typing import Any, Dict
 
 from src.services.sandbox_service import SandboxError, SandboxService
+from src.tools.schemas import FileEditorParams, pydantic_to_openai_schema
 
-FILE_EDITOR_SCHEMA: Dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "file_editor",
-        "description": "Performs exact string replacements in files.\n\nUsage:\n- You must use your `Read` tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file\n- When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix format is: spaces + line number + tab. Everything after that tab is the actual file content to match. Never include any part of the line number prefix in the old_string or new_string\n- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required\n- Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked\n- The edit will FAIL if `old_string` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use `replace_all` to change every instance of `old_string`\n- Use `replace_all` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "The absolute path to the file to modify",
-                },
-                "old_string": {
-                    "type": "string",
-                    "description": "The text to replace",
-                },
-                "new_string": {
-                    "type": "string",
-                    "description": "The text to replace it with (must be different from old_string)",
-                },
-                "replace_all": {
-                    "type": "boolean",
-                    "description": "Replace all occurences of old_string (default false)",
-                },
-            },
-            "required": ["file_path", "old_string", "new_string"],
-        },
-    },
-}
-
-
-def _has_been_read(file_path: str, read_files: Iterable[str] | None) -> bool:
-    if not read_files:
-        return False
-    return file_path in set(read_files)
+FILE_EDITOR_SCHEMA: Dict[str, Any] = pydantic_to_openai_schema(
+    name="file_editor",
+    description="Performs exact string replacements in files.\n\nUsage:\n- When editing text, ensure you preserve the exact indentation (tabs/spaces) as it appears in the file.\n- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.\n- Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.\n- The edit will FAIL if `old_string` is not found in the file. Provide exact matching text including whitespace.\n- If `old_string` matches multiple times and `replace_all` is false, provide more context to make it unique, or set `replace_all` to true.\n- Use `replace_all` to rename all occurrences of a string across the file.",
+    params_model=FileEditorParams,
+)
 
 
 async def file_editor(
@@ -52,57 +23,29 @@ async def file_editor(
     *,
     sandbox_id: str,
     e2b_api_key: str,
-    read_files: Iterable[str] | None,
     file_path: str,
     old_string: str,
     new_string: str,
     replace_all: bool = False,
 ) -> Dict[str, Any]:
-    """Perform exact string replacement in an existing sandbox file."""
-    if not isinstance(file_path, str) or not file_path.strip():
+    """Perform exact string replacement in an existing sandbox file.
+
+    The tool reads the file directly from the sandbox, so prior file_read is
+    not required. Always matches against raw file content.
+    """
+    try:
+        FileEditorParams(file_path=file_path, old_string=old_string, new_string=new_string, replace_all=replace_all)
+    except Exception as exc:
         return {
             "ok": False,
-            "result": "Error: 'file_path' is required and must be a non-empty string.",
+            "result": f"Error: invalid parameters: {exc}",
             "meta": {"tool": "file_editor"},
-        }
-    if not file_path.startswith("/"):
-        return {
-            "ok": False,
-            "result": "Error: 'file_path' must be an absolute path.",
-            "meta": {"tool": "file_editor", "file_path": file_path},
-        }
-    if not isinstance(old_string, str) or old_string == "":
-        return {
-            "ok": False,
-            "result": "Error: 'old_string' is required and must be a non-empty string.",
-            "meta": {"tool": "file_editor", "file_path": file_path},
-        }
-    if not isinstance(new_string, str):
-        return {
-            "ok": False,
-            "result": "Error: 'new_string' must be a string.",
-            "meta": {"tool": "file_editor", "file_path": file_path},
         }
     if new_string == old_string:
         return {
             "ok": False,
             "result": "Error: 'new_string' must be different from 'old_string'.",
             "meta": {"tool": "file_editor", "file_path": file_path},
-        }
-    if not isinstance(replace_all, bool):
-        return {
-            "ok": False,
-            "result": "Error: 'replace_all' must be a boolean when provided.",
-            "meta": {"tool": "file_editor", "file_path": file_path},
-        }
-    if not _has_been_read(file_path, read_files):
-        return {
-            "ok": False,
-            "result": (
-                "Error: file_editor requires the agent to read this file first in the current turn. "
-                "Call file_read with the same 'file_path', inspect the numbered output, then retry file_editor."
-            ),
-            "meta": {"tool": "file_editor", "file_path": file_path, "needs_read": True},
         }
 
     try:

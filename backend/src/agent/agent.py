@@ -47,19 +47,34 @@ class Agent:
 
         Providers occasionally emit minor artefacts; we attempt a direct parse,
         then a lenient recovery, before failing with a structured error.
+
+        Uses a brace-depth counter to correctly extract the outermost JSON object
+        even when nested braces are present inside the content.
         """
         if not raw or not raw.strip():
             return {}
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            # Lenient recovery: extract the outermost JSON object.
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    pass
+            # Lenient recovery: extract the outermost JSON object using
+            # brace-depth matching instead of greedy regex.
+            start = raw.find("{")
+            if start == -1:
+                raise ValueError(f"Invalid tool arguments JSON: {raw[:200]}")
+            depth = 0
+            for end in range(start, len(raw)):
+                ch = raw[end]
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = raw[start:end+1]
+                        try:
+                            return json.loads(candidate)
+                        except json.JSONDecodeError:
+                            pass
+                        break
             raise ValueError(f"Invalid tool arguments JSON: {raw[:200]}")
 
     @staticmethod

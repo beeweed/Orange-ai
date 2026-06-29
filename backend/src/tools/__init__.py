@@ -62,7 +62,6 @@ async def execute_tool(
             sandbox_service,
             sandbox_id=sandbox_id,
             e2b_api_key=e2b_api_key,
-            read_files=read_files,
             **arguments,
         )
     return {
