@@ -63,7 +63,9 @@ async def file_editor(
             "ok": False,
             "result": (
                 "Error: 'old_string' was not found in the file. "
-                "Read the file again and ensure the text matches exactly, including whitespace."
+                "Ensure the text matches exactly, including whitespace, quotes, and special characters. "
+                "If your string contains quotes or escaped characters, verify they match "
+                "the raw file content exactly."
             ),
             "meta": {"tool": "file_editor", "file_path": file_path},
         }

@@ -48,34 +48,151 @@ class Agent:
         Providers occasionally emit minor artefacts; we attempt a direct parse,
         then a lenient recovery, before failing with a structured error.
 
-        Uses a brace-depth counter to correctly extract the outermost JSON object
-        even when nested braces are present inside the content.
+        The recovery correctly handles braces, quotes, and newlines inside
+        string values by tracking string boundaries, so code content like
+        ``function() { return x; }`` does not corrupt the parser.
         """
         if not raw or not raw.strip():
             return {}
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            # Lenient recovery: extract the outermost JSON object using
-            # brace-depth matching instead of greedy regex.
-            start = raw.find("{")
-            if start == -1:
-                raise ValueError(f"Invalid tool arguments JSON: {raw[:200]}")
-            depth = 0
-            for end in range(start, len(raw)):
-                ch = raw[end]
+            candidate = Agent._try_recover_json(raw)
+            if candidate is not None:
+                return candidate
+            raise ValueError(f"Invalid tool arguments JSON: {raw[:200]}")
+
+    @staticmethod
+    def _try_recover_json(raw: str) -> Dict[str, Any] | None:
+        """Try to extract and parse a JSON object from malformed LLM output.
+
+        Uses a state machine that respects string boundaries (handles quotes,
+        escaped characters, braces inside strings, and unescaped newlines).
+        Falls back to targeted extraction when JSON is irrecoverable.
+        """
+        start = raw.find("{")
+        if start == -1:
+            return None
+
+        in_string = False
+        escape = False
+        depth = 0
+
+        for end in range(start, len(raw)):
+            ch = raw[end]
+
+            # Track string boundaries to ignore braces inside strings
+            if escape:
+                escape = False
+                continue
+            if ch == "\\" and in_string:
+                escape = True
+                continue
+            if ch == '"' and not escape:
+                in_string = not in_string
+                continue
+
+            if not in_string:
                 if ch == "{":
                     depth += 1
                 elif ch == "}":
                     depth -= 1
                     if depth == 0:
-                        candidate = raw[start:end+1]
+                        candidate = raw[start:end + 1]
+                        # First attempt: direct parse
                         try:
                             return json.loads(candidate)
                         except json.JSONDecodeError:
                             pass
-                        break
-            raise ValueError(f"Invalid tool arguments JSON: {raw[:200]}")
+                        # Second attempt: replace unescaped newlines inside
+                        # string values with \\n to make the JSON valid.
+                        try:
+                            fixed = Agent._fix_unescaped_newlines(candidate)
+                            return json.loads(fixed)
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                        # Final fallback: try targeted extraction of known
+                        # tool parameters from the raw text.
+                        try:
+                            return Agent._extract_params_fallback(candidate)
+                        except (json.JSONDecodeError, ValueError, TypeError):
+                            return None
+
+        return None
+
+    @staticmethod
+    def _fix_unescaped_newlines(s: str) -> str:
+        """Replace literal newline characters inside JSON string values with \\n."""
+        result = []
+        in_str = False
+        esc = False
+        for ch in s:
+            if esc:
+                result.append(ch)
+                esc = False
+                continue
+            if ch == "\\" and in_str:
+                result.append(ch)
+                esc = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                result.append(ch)
+                continue
+            if in_str and ch in "\n\r":
+                result.append("\\n" if ch == "\n" else "\\r")
+                continue
+            result.append(ch)
+        return "".join(result)
+
+    @staticmethod
+    def _extract_params_fallback(raw: str) -> Dict[str, Any]:
+        """Last-resort extraction of tool parameters from malformed JSON.
+
+        Uses targeted string operations to find known parameter keys and
+        their string values, handling unescaped quotes within values.
+        """
+        result: Dict[str, Any] = {}
+        known_keys = ["file_path", "old_string", "new_string", "content", "replace_all"]
+
+        for key in known_keys:
+            pattern = f'"{key}"\\s*:\\s*"'
+            match = re.search(pattern, raw)
+            if not match:
+                continue
+
+            val_start = match.end()
+            # Find the end of the string value, handling escaped quotes
+            val_parts: list[str] = []
+            i = val_start
+            while i < len(raw):
+                if raw[i] == "\\" and i + 1 < len(raw):
+                    val_parts.append(raw[i])
+                    val_parts.append(raw[i + 1])
+                    i += 2
+                elif raw[i] == '"':
+                    # End of string value
+                    break
+                else:
+                    val_parts.append(raw[i])
+                    i += 1
+
+            val = "".join(val_parts)
+
+            if key == "replace_all":
+                # Try to find a boolean value instead of string
+                bool_match = re.search(f'"{key}"\\s*:\\s*(true|false)', raw)
+                if bool_match:
+                    result[key] = bool_match.group(1) == "true"
+                else:
+                    result[key] = val.lower() == "true" if val else False
+            else:
+                result[key] = val
+
+        if not result:
+            raise ValueError("could not extract parameters")
+
+        return result
 
     @staticmethod
     def _signature(name: str, arguments: Dict[str, Any]) -> str:

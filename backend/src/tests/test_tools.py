@@ -235,6 +235,13 @@ def test_parse_arguments_valid_and_recovery():
     # Recovery from surrounding noise.
     assert Agent._parse_arguments('prefix {"b": 2} suffix') == {"b": 2}
     assert Agent._parse_arguments("") == {}
+    # Braces inside string values.
+    assert Agent._parse_arguments('{"code": "function() { return 1; }"}') == {"code": "function() { return 1; }"}
+    # Unescaped newlines inside string values.
+    assert Agent._parse_arguments('{"old": "line1\nline2", "new": "replacement"}') == {"old": "line1\nline2", "new": "replacement"}
+    # Quotes and special characters inside string values.
+    result = Agent._parse_arguments('{"s": "he said \\"hello\\" world"}')
+    assert result == {"s": 'he said "hello" world'}
 
 
 def test_signature_stability():
