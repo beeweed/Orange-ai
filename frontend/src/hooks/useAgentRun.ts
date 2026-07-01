@@ -99,6 +99,8 @@ export function useAgentRun() {
         model: settings.model,
         e2b_api_key: settings.e2bApiKey,
         sandbox_template: settings.sandboxTemplate || null,
+        tavily_api_key: settings.tavilyApiKey || null,
+        firecrawl_api_key: settings.firecrawlApiKey || null,
       },
       history,
       message: text,
@@ -158,6 +160,7 @@ export function useAgentRun() {
               if (t) {
                 t.status = evt.ok ? 'success' : 'error'
                 t.result = evt.result
+                t.meta = evt.meta
               }
               a.setPhase('thinking')
               flush(true)

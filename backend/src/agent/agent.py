@@ -237,7 +237,13 @@ class Agent:
         messages.append({"role": "user", "content": user_message})
 
         recent_signatures: List[str] = []
-        tool_execution_context: Dict[str, Any] = {"read_files": set()}
+        tool_execution_context: Dict[str, Any] = {
+            "read_files": set(),
+            "tool_credentials": {
+                "tavily_api_key": credentials.tavily_api_key,
+                "firecrawl_api_key": credentials.firecrawl_api_key,
+            },
+        }
         iteration = 0
 
         while iteration < self._max_iterations:
@@ -417,7 +423,7 @@ class Agent:
 
     @staticmethod
     def _display_label(name: str, arguments: Dict[str, Any]) -> str:
-        """Human-friendly chip label, e.g. 'create: /path' or 'read: /path'."""
+        """Human-friendly chip label, e.g. 'create: /path' or 'search: query'."""
         path = arguments.get("file_path", "")
         if name == "file_write":
             return f"create: {path}" if path else "create"
@@ -429,4 +435,10 @@ class Agent:
             return f"line-edit: {path}" if path else "line-edit"
         if name == "insert_after_line":
             return f"insert: {path}" if path else "insert"
+        if name == "web_search":
+            query = str(arguments.get("query", "")).strip()
+            return f"search: {query}" if query else "search"
+        if name == "fatch_web_urls":
+            url = str(arguments.get("url", "")).strip()
+            return f"fetch: {url}" if url else "fetch"
         return name

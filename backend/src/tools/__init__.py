@@ -12,10 +12,12 @@ from typing import Any, Dict
 
 from src.services.sandbox_service import sandbox_service
 from src.tools.edit_tool import FILE_EDITOR_SCHEMA, file_editor
+from src.tools.fatch_web_urls import FATCH_WEB_URLS_SCHEMA, fatch_web_urls
 from src.tools.file_read import FILE_READ_SCHEMA, file_read
 from src.tools.file_write import FILE_WRITE_SCHEMA, file_write
 from src.tools.insert_after_line import INSERT_AFTER_LINE_SCHEMA, insert_after_line
 from src.tools.line_edit_tool import LINE_EDIT_SCHEMA, line_edit
+from src.tools.web_search_tool import WEB_SEARCH_SCHEMA, web_search
 
 # Native tool schemas passed directly to the LLM `tools` parameter.
 TOOL_SCHEMAS: list[dict] = [
@@ -24,6 +26,8 @@ TOOL_SCHEMAS: list[dict] = [
     FILE_EDITOR_SCHEMA,
     LINE_EDIT_SCHEMA,
     INSERT_AFTER_LINE_SCHEMA,
+    WEB_SEARCH_SCHEMA,
+    FATCH_WEB_URLS_SCHEMA,
 ]
 
 
@@ -43,6 +47,7 @@ async def execute_tool(
     """
     execution_context = execution_context or {}
     read_files = execution_context.setdefault("read_files", set())
+    tool_credentials = execution_context.setdefault("tool_credentials", {})
 
     if name == "file_write":
         return await file_write(
@@ -81,6 +86,16 @@ async def execute_tool(
             sandbox_service,
             sandbox_id=sandbox_id,
             e2b_api_key=e2b_api_key,
+            **arguments,
+        )
+    if name == "web_search":
+        return await web_search(
+            tavily_api_key=tool_credentials.get("tavily_api_key"),
+            **arguments,
+        )
+    if name == "fatch_web_urls":
+        return await fatch_web_urls(
+            firecrawl_api_key=tool_credentials.get("firecrawl_api_key"),
             **arguments,
         )
     return {

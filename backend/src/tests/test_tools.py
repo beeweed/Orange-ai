@@ -13,10 +13,12 @@ import pytest
 from src.agent.agent import Agent
 from src.tools import TOOL_SCHEMAS, execute_tool
 from src.tools.edit_tool import FILE_EDITOR_SCHEMA, file_editor
+from src.tools.fatch_web_urls import FATCH_WEB_URLS_SCHEMA
 from src.tools.file_read import FILE_READ_SCHEMA, file_read
 from src.tools.file_write import FILE_WRITE_SCHEMA, file_write
 from src.tools.insert_after_line import INSERT_AFTER_LINE_SCHEMA, insert_after_line
 from src.tools.line_edit_tool import LINE_EDIT_SCHEMA, line_edit
+from src.tools.web_search_tool import WEB_SEARCH_SCHEMA
 
 
 class _StubSandbox:
@@ -70,7 +72,15 @@ class _StubSandbox:
 
 def test_tool_schemas_present():
     names = {s["function"]["name"] for s in TOOL_SCHEMAS}
-    assert names == {"file_write", "file_read", "file_editor", "line_edit", "insert_after_line"}
+    assert names == {
+        "file_write",
+        "file_read",
+        "file_editor",
+        "line_edit",
+        "insert_after_line",
+        "web_search",
+        "fatch_web_urls",
+    }
 
 
 def test_file_write_schema_shape():
@@ -101,6 +111,18 @@ def test_insert_after_line_schema_shape():
     fn = INSERT_AFTER_LINE_SCHEMA["function"]
     assert fn["name"] == "insert_after_line"
     assert set(fn["parameters"]["required"]) == {"file_path", "line_number", "content"}
+
+
+def test_web_search_schema_shape():
+    fn = WEB_SEARCH_SCHEMA["function"]
+    assert fn["name"] == "web_search"
+    assert fn["parameters"]["required"] == ["query"]
+
+
+def test_fatch_web_urls_schema_shape():
+    fn = FATCH_WEB_URLS_SCHEMA["function"]
+    assert fn["name"] == "fatch_web_urls"
+    assert fn["parameters"]["required"] == ["url"]
 
 
 def test_write_then_read_roundtrip():
@@ -572,3 +594,59 @@ def test_signature_stability():
     s1 = Agent._signature("file_write", {"file_path": "/x", "content": "y"})
     s2 = Agent._signature("file_write", {"content": "y", "file_path": "/x"})
     assert s1 == s2
+
+
+def test_execute_tool_dispatches_web_search(monkeypatch):
+    async def _fake_web_search(*, query, tavily_api_key=None):
+        assert query == "latest ai news"
+        assert tavily_api_key == "tvly_test"
+        return {
+            "ok": True,
+            "result": '[{"title": "Example", "url": "https://example.com", "Description": "summary"}]',
+            "meta": {"tool": "web_search", "count": 1},
+        }
+
+    import src.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod, "web_search", _fake_web_search)
+
+    async def _run():
+        result = await execute_tool(
+            "web_search",
+            {"query": "latest ai news"},
+            sandbox_id="sb",
+            e2b_api_key="k",
+            execution_context={"read_files": set(), "tool_credentials": {"tavily_api_key": "tvly_test"}},
+        )
+        assert result["ok"] is True
+        assert '"title": "Example"' in result["result"]
+
+    asyncio.run(_run())
+
+
+def test_execute_tool_dispatches_fatch_web_urls(monkeypatch):
+    async def _fake_fetch(*, url, firecrawl_api_key=None):
+        assert url == "https://example.com"
+        assert firecrawl_api_key == "fc_test"
+        return {
+            "ok": True,
+            "result": '{"content": "hello world", "url": "https://example.com"}',
+            "meta": {"tool": "fatch_web_urls", "url": url},
+        }
+
+    import src.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod, "fatch_web_urls", _fake_fetch)
+
+    async def _run():
+        result = await execute_tool(
+            "fatch_web_urls",
+            {"url": "https://example.com"},
+            sandbox_id="sb",
+            e2b_api_key="k",
+            execution_context={"read_files": set(), "tool_credentials": {"firecrawl_api_key": "fc_test"}},
+        )
+        assert result["ok"] is True
+        assert '"content": "hello world"' in result["result"]
+
+    asyncio.run(_run())

@@ -13,6 +13,8 @@ interface SettingsState extends AppSettings {
   setOpenrouterApiKey: (k: string) => void
   setNvidiaApiKey: (k: string) => void
   setE2bApiKey: (k: string) => void
+  setTavilyApiKey: (k: string) => void
+  setFirecrawlApiKey: (k: string) => void
   setSandboxTemplate: (t: string) => void
   setModel: (m: string) => void
   setModels: (m: ModelInfo[]) => void
@@ -30,6 +32,8 @@ export const useSettingsStore = create<SettingsState>()(
       openrouterApiKey: '',
       nvidiaApiKey: '',
       e2bApiKey: '',
+      tavilyApiKey: '',
+      firecrawlApiKey: '',
       sandboxTemplate: '',
       model: '',
       models: [],
@@ -40,6 +44,8 @@ export const useSettingsStore = create<SettingsState>()(
       setOpenrouterApiKey: (openrouterApiKey) => set({ openrouterApiKey }),
       setNvidiaApiKey: (nvidiaApiKey) => set({ nvidiaApiKey }),
       setE2bApiKey: (e2bApiKey) => set({ e2bApiKey }),
+      setTavilyApiKey: (tavilyApiKey) => set({ tavilyApiKey }),
+      setFirecrawlApiKey: (firecrawlApiKey) => set({ firecrawlApiKey }),
       setSandboxTemplate: (sandboxTemplate) => set({ sandboxTemplate }),
       setModel: (model) => set({ model }),
       setModels: (models) => set({ models }),
@@ -64,6 +70,8 @@ export const useSettingsStore = create<SettingsState>()(
         openrouterApiKey: s.openrouterApiKey,
         nvidiaApiKey: s.nvidiaApiKey,
         e2bApiKey: s.e2bApiKey,
+        tavilyApiKey: s.tavilyApiKey,
+        firecrawlApiKey: s.firecrawlApiKey,
         sandboxTemplate: s.sandboxTemplate,
         model: s.model,
       }),

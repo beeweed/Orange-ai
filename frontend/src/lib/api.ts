@@ -12,6 +12,8 @@ export interface StreamPayload {
     model: string
     e2b_api_key: string
     sandbox_template?: string | null
+    tavily_api_key?: string | null
+    firecrawl_api_key?: string | null
   }
   history: Array<{
     role: 'user' | 'assistant' | 'tool' | 'system'

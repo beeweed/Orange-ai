@@ -14,12 +14,21 @@ export interface ModelInfo {
 // Tool activity attached to an assistant message (rendered as chips/cards).
 export interface ToolActivity {
   id: string
-  name: 'file_write' | 'file_read' | 'file_editor' | 'line_edit' | 'insert_after_line' | string
+  name:
+    | 'file_write'
+    | 'file_read'
+    | 'file_editor'
+    | 'line_edit'
+    | 'insert_after_line'
+    | 'web_search'
+    | 'fatch_web_urls'
+    | string
   display: string // e.g. "create: /home/user/App.tsx"
   filePath?: string
   arguments?: Record<string, unknown>
   status: 'running' | 'success' | 'error'
   result?: string
+  meta?: Record<string, unknown>
 }
 
 // One chat message stored in history (persisted to localStorage).
@@ -56,6 +65,8 @@ export interface AppSettings {
   openrouterApiKey: string
   nvidiaApiKey: string
   e2bApiKey: string
+  tavilyApiKey: string
+  firecrawlApiKey: string
   sandboxTemplate: string
   model: string
 }

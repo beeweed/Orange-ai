@@ -71,11 +71,21 @@ class Credentials(BaseModel):
     model: str = Field(min_length=1)
     e2b_api_key: str = Field(min_length=1)
     sandbox_template: Optional[str] = None  # optional custom E2B template id
+    tavily_api_key: Optional[str] = None
+    firecrawl_api_key: Optional[str] = None
 
     @field_validator("api_key", "e2b_api_key", "model")
     @classmethod
     def _strip(cls, v: str) -> str:
         return v.strip()
+
+    @field_validator("sandbox_template", "tavily_api_key", "firecrawl_api_key", mode="before")
+    @classmethod
+    def _strip_optional(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
 
 
 class ChatRequest(BaseModel):

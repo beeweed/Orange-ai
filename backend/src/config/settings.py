@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     http_connect_timeout: float = 30.0
     http_read_timeout: float = 600.0
 
+    # ---- Web retrieval tools ----
+    max_search_results: int = 15
+    search_provider: str = "tavily"
+    fetch_provider: str = "firecrawl"
+    tavily_search_url: str = "https://api.tavily.com/search"
+    firecrawl_scrape_url: str = "https://api.firecrawl.dev/v2/scrape"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

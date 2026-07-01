@@ -41,6 +41,18 @@ class FileEditorParams(BaseModel):
     )
 
 
+class WebSearchParams(BaseModel):
+    query: str = Field(
+        ..., description="The search query"
+    )
+
+
+class FetchWebUrlParams(BaseModel):
+    url: str = Field(
+        ..., description="The URL to fetch"
+    )
+
+
 def pydantic_to_openai_schema(
     name: str,
     description: str,

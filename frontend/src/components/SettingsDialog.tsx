@@ -158,6 +158,62 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               </div>
             </div>
 
+            {/* Web retrieval keys */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <SparkIcon className="w-4 h-4 text-sky-400" />
+                <label className="text-sm font-medium text-foreground">
+                  Web retrieval API keys <span className="text-muted-foreground">(optional)</span>
+                </label>
+              </div>
+              <div className="grid gap-3">
+                <div className="bg-[#363638] rounded-xl p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-medium text-foreground">Tavily search</span>
+                    <a
+                      href="https://app.tavily.com/home"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-primary hover:underline"
+                    >
+                      Get key
+                    </a>
+                  </div>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="tvly_..."
+                    value={s.tavilyApiKey}
+                    onChange={(e) => s.setTavilyApiKey(e.target.value)}
+                    className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                  />
+                </div>
+                <div className="bg-[#363638] rounded-xl p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-medium text-foreground">Firecrawl fetch</span>
+                    <a
+                      href="https://www.firecrawl.dev/app/api-keys"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-primary hover:underline"
+                    >
+                      Get key
+                    </a>
+                  </div>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="fc_..."
+                    value={s.firecrawlApiKey}
+                    onChange={(e) => s.setFirecrawlApiKey(e.target.value)}
+                    className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* Sandbox template */}
             <div className="space-y-3">
               <div className="flex items-center gap-2">

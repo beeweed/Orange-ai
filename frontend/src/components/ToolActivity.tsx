@@ -11,6 +11,7 @@ import {
   CodeIcon,
   EyeIcon,
   RefreshIcon,
+  SearchIcon,
   XCircleIcon,
 } from './Icons'
 
@@ -29,6 +30,14 @@ interface ToolDefinition {
     description: string
   }>
 }
+
+const FILE_TOOL_NAMES = new Set([
+  'file_write',
+  'file_read',
+  'file_editor',
+  'line_edit',
+  'insert_after_line',
+])
 
 const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
   file_write: {
@@ -142,6 +151,32 @@ const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
       },
     ],
   },
+  web_search: {
+    signature: 'web_search(query: string)',
+    description:
+      'Search the live web with Tavily and return compact result objects containing title, url, and Description.',
+    fields: [
+      {
+        name: 'query',
+        type: 'string',
+        required: true,
+        description: 'Search query for recent, real-time, or otherwise unknown information.',
+      },
+    ],
+  },
+  fatch_web_urls: {
+    signature: 'fatch_web_urls(url: string)',
+    description:
+      'Fetch one URL with Firecrawl and return clean page content for deeper reasoning.',
+    fields: [
+      {
+        name: 'url',
+        type: 'string',
+        required: true,
+        description: 'Single http(s) URL to fetch and extract.',
+      },
+    ],
+  },
 }
 
 function stringifyPayload(value: Record<string, unknown> | undefined, fallback: string) {
@@ -149,13 +184,26 @@ function stringifyPayload(value: Record<string, unknown> | undefined, fallback: 
   return JSON.stringify(value, null, 2)
 }
 
+function tryParseJson(value: string | undefined) {
+  if (!value) return null
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    return null
+  }
+}
+
 export function ToolActivityChip({ tool, onOpenFile }: Props) {
   const [expanded, setExpanded] = useState(false)
 
+  const isFileTool = FILE_TOOL_NAMES.has(tool.name)
   const isWrite = tool.name === 'file_write'
   const isEdit = tool.name === 'file_editor'
   const isLineEdit = tool.name === 'line_edit'
   const isInsert = tool.name === 'insert_after_line'
+  const isSearch = tool.name === 'web_search'
+  const isFetch = tool.name === 'fatch_web_urls'
+
   const verb = isWrite
     ? 'create'
     : isEdit
@@ -164,17 +212,24 @@ export function ToolActivityChip({ tool, onOpenFile }: Props) {
         ? 'line-edit'
         : isInsert
           ? 'insert'
-          : tool.name === 'file_read'
-            ? 'read'
-            : tool.name
-  const path = tool.filePath ?? tool.display.replace(/^[^:]*:\s*/, '')
+          : isSearch
+            ? 'search'
+            : isFetch
+              ? 'fetch'
+              : tool.name === 'file_read'
+                ? 'read'
+                : tool.name
+
+  const summaryValue = isFileTool
+    ? tool.filePath ?? tool.display.replace(/^[^:]*:\s*/, '')
+    : tool.display.replace(/^[^:]*:\s*/, '') || tool.name
 
   const statusColor =
     tool.status === 'success'
       ? 'border-emerald-500/25 bg-emerald-500/[0.06]'
       : tool.status === 'error'
-      ? 'border-destructive/30 bg-destructive/[0.06]'
-      : 'border-primary/25 bg-primary/[0.06]'
+        ? 'border-destructive/30 bg-destructive/[0.06]'
+        : 'border-primary/25 bg-primary/[0.06]'
 
   const schema = TOOL_DEFINITIONS[tool.name]
   const inputText = useMemo(
@@ -183,6 +238,13 @@ export function ToolActivityChip({ tool, onOpenFile }: Props) {
   )
   const outputText =
     tool.result || (tool.status === 'running' ? 'Waiting for tool output…' : 'No output available.')
+
+  const parsedResult = useMemo(() => tryParseJson(tool.result), [tool.result])
+  const searchResults = Array.isArray(parsedResult) ? parsedResult : null
+  const fetchedPage =
+    parsedResult && typeof parsedResult === 'object' && !Array.isArray(parsedResult)
+      ? (parsedResult as Record<string, unknown>)
+      : null
 
   return (
     <div
@@ -193,8 +255,10 @@ export function ToolActivityChip({ tool, onOpenFile }: Props) {
     >
       <div className="flex max-w-full items-center gap-2 px-2.5 py-1.5">
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white/5">
-          {isWrite || isEdit || isLineEdit || isInsert ? (
+          {isFileTool ? (
             <CodeIcon className="h-3 w-3 text-blue-400" />
+          ) : isSearch ? (
+            <SearchIcon className="h-3 w-3 text-sky-400" />
           ) : (
             <EyeIcon className="h-3 w-3 text-accent" />
           )}
@@ -202,18 +266,18 @@ export function ToolActivityChip({ tool, onOpenFile }: Props) {
 
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{verb}:</span>
 
-        {path && onOpenFile ? (
+        {isFileTool && summaryValue && onOpenFile ? (
           <button
             type="button"
-            onClick={() => onOpenFile(path)}
-            className="max-w-[200px] truncate font-mono text-[11px] text-foreground/90 transition-colors hover:text-foreground"
-            title={`Open ${path}`}
+            onClick={() => onOpenFile(summaryValue)}
+            className="max-w-[220px] truncate font-mono text-[11px] text-foreground/90 transition-colors hover:text-foreground"
+            title={`Open ${summaryValue}`}
           >
-            {path}
+            {summaryValue}
           </button>
         ) : (
-          <span className="max-w-[200px] truncate font-mono text-[11px] text-foreground/90">
-            {path || tool.name}
+          <span className="max-w-[220px] truncate font-mono text-[11px] text-foreground/90">
+            {summaryValue || tool.name}
           </span>
         )}
 
@@ -303,11 +367,50 @@ export function ToolActivityChip({ tool, onOpenFile }: Props) {
                   Tool result
                 </span>
               </div>
-              <div className="rounded-md bg-[#0f1115] p-2">
-                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-foreground/88">
-                  {outputText}
-                </pre>
-              </div>
+
+              {isSearch && searchResults ? (
+                <div className="space-y-2">
+                  <div className="rounded-md bg-[#0f1115] px-2 py-1.5 text-[10px] text-muted-foreground">
+                    {searchResults.length} search result{searchResults.length === 1 ? '' : 's'}
+                  </div>
+                  <div className="max-h-72 space-y-2 overflow-auto rounded-md bg-[#0f1115] p-2">
+                    {searchResults.map((entry, index) => {
+                      const item = entry as Record<string, unknown>
+                      return (
+                        <div key={`${String(item.url)}-${index}`} className="rounded-md border border-white/8 bg-white/[0.03] p-2">
+                          <div className="text-[11px] font-semibold text-foreground/92">
+                            {String(item.title ?? 'Untitled result')}
+                          </div>
+                          <div className="mt-1 break-all font-mono text-[10px] text-sky-300/90">
+                            {String(item.url ?? '')}
+                          </div>
+                          <p className="mt-1 whitespace-pre-wrap text-[10px] leading-relaxed text-muted-foreground">
+                            {String(item.Description ?? '')}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : isFetch && fetchedPage ? (
+                <div className="space-y-2">
+                  <div className="rounded-md bg-[#0f1115] px-2 py-1.5 font-mono text-[10px] text-sky-300/90 break-all">
+                    {String(fetchedPage.url ?? tool.meta?.url ?? 'Unknown URL')}
+                  </div>
+                  <div className="rounded-md bg-[#0f1115] p-2">
+                    <div className="mb-1 text-[10px] font-medium text-muted-foreground">Fetched content</div>
+                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-foreground/88">
+                      {String(fetchedPage.content ?? '')}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-md bg-[#0f1115] p-2">
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-foreground/88">
+                    {outputText}
+                  </pre>
+                </div>
+              )}
             </section>
           </div>
         </div>
