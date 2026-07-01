@@ -418,4 +418,6 @@ class Agent:
             return f"read: {path}" if path else "read"
         if name == "file_editor":
             return f"edit: {path}" if path else "edit"
+        if name == "insert_after_line":
+            return f"insert: {path}" if path else "insert"
         return name

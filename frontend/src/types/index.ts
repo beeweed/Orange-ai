@@ -14,7 +14,7 @@ export interface ModelInfo {
 // Tool activity attached to an assistant message (rendered as chips/cards).
 export interface ToolActivity {
   id: string
-  name: 'file_write' | 'file_read' | 'file_editor' | string
+  name: 'file_write' | 'file_read' | 'file_editor' | 'insert_after_line' | string
   display: string // e.g. "create: /home/user/App.tsx"
   filePath?: string
   status: 'running' | 'success' | 'error'

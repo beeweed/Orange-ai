@@ -69,7 +69,7 @@ class AgentController:
                 etype = evt.get("type")
 
                 # Mark the tree dirty after a successful file mutation so we refresh it.
-                if etype == "tool_result" and evt.get("ok") and evt.get("name") in {"file_write", "file_editor"}:
+                if etype == "tool_result" and evt.get("ok") and evt.get("name") in {"file_write", "file_editor", "insert_after_line"}:
                     files_dirty = True
 
                 yield sse_event(etype, {k: v for k, v in evt.items() if k != "type"})

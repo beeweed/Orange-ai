@@ -17,7 +17,10 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, Optional
+import base64
+import json
+import textwrap
+from typing import Any, Dict, Optional
 
 from e2b import Sandbox
 from e2b.sandbox.sandbox_api import SandboxInfo
@@ -234,6 +237,129 @@ class SandboxService:
         except Exception as exc:  # noqa: BLE001
             logger.error("read_file failed for %s: %s", file_path, exc)
             raise SandboxError(str(exc)) from exc
+
+    @staticmethod
+    def _parse_command_json(stdout: str) -> Dict[str, Any]:
+        """Extract the last JSON object emitted by a sandbox command."""
+        for line in reversed((stdout or "").splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        raise SandboxError("Sandbox command did not return a valid JSON payload.")
+
+    async def run_command(
+        self,
+        sandbox_id: str,
+        api_key: str,
+        command: str,
+        *,
+        timeout: int = 30,
+    ) -> Dict[str, Any]:
+        """Run a shell command inside the sandbox and return stdout/stderr metadata."""
+        sandbox = await self._get_sandbox(sandbox_id, api_key)
+
+        def _run() -> Dict[str, Any]:
+            result = sandbox.commands.run(command, timeout=timeout)
+            return {
+                "stdout": result.stdout or "",
+                "stderr": result.stderr or "",
+                "exit_code": getattr(result, "exit_code", 0),
+            }
+
+        try:
+            return await asyncio.to_thread(_run)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("run_command failed: %s", exc)
+            raise SandboxError(str(exc)) from exc
+
+    async def insert_after_line(
+        self,
+        sandbox_id: str,
+        api_key: str,
+        *,
+        file_path: str,
+        line_number: int,
+        content: str,
+    ) -> Dict[str, Any]:
+        """Insert content after a line by executing Python inside the sandbox."""
+        payload_b64 = base64.b64encode(
+            json.dumps(
+                {
+                    "file_path": file_path,
+                    "line_number": line_number,
+                    "content": content,
+                }
+            ).encode("utf-8")
+        ).decode("ascii")
+
+        command = textwrap.dedent(
+            f"""\
+            python - <<'PY'
+            import base64
+            import json
+            import pathlib
+            import re
+
+            try:
+                payload = json.loads(base64.b64decode({payload_b64!r}).decode("utf-8"))
+                file_path = payload["file_path"]
+                line_number = int(payload["line_number"])
+                content = payload["content"]
+
+                path = pathlib.Path(file_path)
+                if not path.exists():
+                    print(json.dumps({{"ok": False, "error": f"Error: file '{{file_path}}' does not exist.", "code": "FILE_NOT_FOUND"}}))
+                    raise SystemExit(0)
+                if not path.is_file():
+                    print(json.dumps({{"ok": False, "error": f"Error: path '{{file_path}}' is not a file.", "code": "NOT_A_FILE"}}))
+                    raise SystemExit(0)
+
+                text = path.read_text(encoding="utf-8")
+                lines = text.splitlines(keepends=True)
+                if line_number < 1 or line_number > len(lines):
+                    print(json.dumps({{
+                        "ok": False,
+                        "error": f"Error: 'line_number' must be between 1 and {{len(lines)}} for {{file_path}}.",
+                        "code": "INVALID_LINE_NUMBER",
+                        "line_count": len(lines),
+                    }}))
+                    raise SystemExit(0)
+
+                newline_match = re.search(r"\\r\\n|\\n|\\r", text)
+                newline = newline_match.group(0) if newline_match else "\\n"
+                separator = "" if lines[line_number - 1].endswith(("\\n", "\\r")) else newline
+                inserted = content
+                if inserted and line_number < len(lines) and not inserted.endswith(("\\n", "\\r")):
+                    inserted += newline
+
+                updated = "".join(lines[:line_number]) + separator + inserted + "".join(lines[line_number:])
+                path.write_text(updated, encoding="utf-8")
+                print(json.dumps({{
+                    "ok": True,
+                    "line_count": len(lines),
+                    "inserted_line_count": len(content.splitlines()) or (1 if content else 0),
+                }}))
+            except SystemExit:
+                raise
+            except Exception as exc:
+                print(json.dumps({{"ok": False, "error": f"Error inserting content after line {{line_number}} in '{{file_path}}': {{exc}}", "code": "UNEXPECTED"}}))
+            PY
+            """
+        )
+
+        result = await self.run_command(sandbox_id, api_key, command, timeout=30)
+        exit_code = result.get("exit_code")
+        if exit_code not in (0, None):
+            stderr = (result.get("stderr") or "").strip()
+            stdout = (result.get("stdout") or "").strip()
+            raise SandboxError(stderr or stdout or "insert_after_line command failed")
+        return self._parse_command_json(result.get("stdout", ""))
 
     async def list_tree(self, sandbox_id: str, api_key: str, root: str = "/home/user") -> list[dict]:
         """List the recursive file tree under `root` for the explorer panel.

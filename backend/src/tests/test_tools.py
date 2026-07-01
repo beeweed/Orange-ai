@@ -15,6 +15,7 @@ from src.tools import TOOL_SCHEMAS, execute_tool
 from src.tools.edit_tool import FILE_EDITOR_SCHEMA, file_editor
 from src.tools.file_read import FILE_READ_SCHEMA, file_read
 from src.tools.file_write import FILE_WRITE_SCHEMA, file_write
+from src.tools.insert_after_line import INSERT_AFTER_LINE_SCHEMA, insert_after_line
 
 
 class _StubSandbox:
@@ -33,10 +34,42 @@ class _StubSandbox:
             raise SandboxError("not found")
         return self.store[file_path]
 
+    async def insert_after_line(self, sandbox_id, api_key, *, file_path, line_number, content):
+        if file_path not in self.store:
+            return {"ok": False, "error": f"Error: file '{file_path}' does not exist.", "code": "FILE_NOT_FOUND"}
+
+        text = self.store[file_path]
+        lines = text.splitlines(keepends=True)
+        if line_number < 1 or line_number > len(lines):
+            return {
+                "ok": False,
+                "error": f"Error: 'line_number' must be between 1 and {len(lines)} for {file_path}.",
+                "code": "INVALID_LINE_NUMBER",
+                "line_count": len(lines),
+            }
+
+        newline = "\n"
+        for candidate in ("\r\n", "\n", "\r"):
+            if candidate in text:
+                newline = candidate
+                break
+
+        separator = "" if lines[line_number - 1].endswith(("\n", "\r")) else newline
+        inserted = content
+        if inserted and line_number < len(lines) and not inserted.endswith(("\n", "\r")):
+            inserted += newline
+
+        self.store[file_path] = "".join(lines[:line_number]) + separator + inserted + "".join(lines[line_number:])
+        return {
+            "ok": True,
+            "line_count": len(lines),
+            "inserted_line_count": len(content.splitlines()) or (1 if content else 0),
+        }
+
 
 def test_tool_schemas_present():
     names = {s["function"]["name"] for s in TOOL_SCHEMAS}
-    assert names == {"file_write", "file_read", "file_editor"}
+    assert names == {"file_write", "file_read", "file_editor", "insert_after_line"}
 
 
 def test_file_write_schema_shape():
@@ -55,6 +88,12 @@ def test_file_editor_schema_shape():
     fn = FILE_EDITOR_SCHEMA["function"]
     assert fn["name"] == "file_editor"
     assert set(fn["parameters"]["required"]) == {"file_path", "old_string", "new_string"}
+
+
+def test_insert_after_line_schema_shape():
+    fn = INSERT_AFTER_LINE_SCHEMA["function"]
+    assert fn["name"] == "insert_after_line"
+    assert set(fn["parameters"]["required"]) == {"file_path", "line_number", "content"}
 
 
 def test_write_then_read_roundtrip():
@@ -185,6 +224,74 @@ def test_file_editor_old_string_missing_returns_error():
     asyncio.run(_run())
 
 
+def test_insert_after_line_success():
+    stub = _StubSandbox()
+
+    async def _run():
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="alpha\nbeta\ngamma",
+        )
+        result = await insert_after_line(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            line_number=2,
+            content="delta",
+        )
+        assert result["ok"] is True
+        assert stub.store["/home/user/a.txt"] == "alpha\nbeta\ndelta\ngamma"
+
+    asyncio.run(_run())
+
+
+def test_insert_after_line_missing_file_returns_structured_error():
+    stub = _StubSandbox()
+
+    async def _run():
+        result = await insert_after_line(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/missing.txt",
+            line_number=1,
+            content="delta",
+        )
+        assert result["ok"] is False
+        assert "does not exist" in result["result"].lower()
+
+    asyncio.run(_run())
+
+
+def test_insert_after_line_invalid_line_returns_structured_error():
+    stub = _StubSandbox()
+
+    async def _run():
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="alpha\nbeta",
+        )
+        result = await insert_after_line(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            line_number=5,
+            content="delta",
+        )
+        assert result["ok"] is False
+        assert "line_number" in result["result"]
+
+    asyncio.run(_run())
+
+
 def test_execute_tool_tracks_reads_for_editor():
     stub = _StubSandbox()
 
@@ -224,6 +331,43 @@ def test_execute_tool_tracks_reads_for_editor():
             )
             assert edit_result["ok"] is True
             assert stub.store["/home/user/a.txt"] == "after"
+        finally:
+            tools_mod.sandbox_service = original
+
+    asyncio.run(_run())
+
+
+def test_execute_tool_dispatches_insert_after_line():
+    stub = _StubSandbox()
+
+    async def _run():
+        context = {"read_files": set()}
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="alpha\nbeta",
+        )
+
+        import src.tools as tools_mod
+
+        original = tools_mod.sandbox_service
+        tools_mod.sandbox_service = stub
+        try:
+            result = await execute_tool(
+                "insert_after_line",
+                {
+                    "file_path": "/home/user/a.txt",
+                    "line_number": 1,
+                    "content": "delta",
+                },
+                sandbox_id="sb",
+                e2b_api_key="k",
+                execution_context=context,
+            )
+            assert result["ok"] is True
+            assert stub.store["/home/user/a.txt"] == "alpha\ndelta\nbeta"
         finally:
             tools_mod.sandbox_service = original
 

@@ -19,7 +19,16 @@ interface Props {
 export function ToolActivityChip({ tool, onOpenFile }: Props) {
   const isWrite = tool.name === 'file_write'
   const isEdit = tool.name === 'file_editor'
-  const verb = isWrite ? 'create' : isEdit ? 'edit' : tool.name === 'file_read' ? 'read' : tool.name
+  const isInsert = tool.name === 'insert_after_line'
+  const verb = isWrite
+    ? 'create'
+    : isEdit
+      ? 'edit'
+      : isInsert
+        ? 'insert'
+        : tool.name === 'file_read'
+          ? 'read'
+          : tool.name
   const path = tool.filePath ?? tool.display.replace(/^[^:]*:\s*/, '')
 
   const statusColor =
@@ -42,7 +51,7 @@ export function ToolActivityChip({ tool, onOpenFile }: Props) {
       title={tool.result || path}
     >
       <span className="flex h-5 w-5 items-center justify-center rounded-md bg-white/5">
-        {isWrite || isEdit ? (
+        {isWrite || isEdit || isInsert ? (
           <CodeIcon className="h-3 w-3 text-blue-400" />
         ) : (
           <EyeIcon className="h-3 w-3 text-accent" />
