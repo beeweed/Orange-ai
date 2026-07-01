@@ -17,6 +17,7 @@ export interface ToolActivity {
   name: 'file_write' | 'file_read' | 'file_editor' | 'insert_after_line' | string
   display: string // e.g. "create: /home/user/App.tsx"
   filePath?: string
+  arguments?: Record<string, unknown>
   status: 'running' | 'success' | 'error'
   result?: string
 }

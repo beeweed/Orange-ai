@@ -147,6 +147,7 @@ export function useAgentRun() {
                 name: evt.name,
                 display: evt.display,
                 filePath,
+                arguments: evt.arguments,
                 status: 'running',
               })
               flush(true)
