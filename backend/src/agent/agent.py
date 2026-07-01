@@ -153,7 +153,14 @@ class Agent:
         their string values, handling unescaped quotes within values.
         """
         result: Dict[str, Any] = {}
-        known_keys = ["file_path", "old_string", "new_string", "content", "replace_all"]
+        known_keys = [
+            "file_path",
+            "old_string",
+            "old_string_line_numbers",
+            "new_string",
+            "content",
+            "replace_all",
+        ]
 
         for key in known_keys:
             pattern = f'"{key}"\\s*:\\s*"'
@@ -418,6 +425,8 @@ class Agent:
             return f"read: {path}" if path else "read"
         if name == "file_editor":
             return f"edit: {path}" if path else "edit"
+        if name == "line_edit":
+            return f"line-edit: {path}" if path else "line-edit"
         if name == "insert_after_line":
             return f"insert: {path}" if path else "insert"
         return name

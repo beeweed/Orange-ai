@@ -16,6 +16,7 @@ from src.tools.edit_tool import FILE_EDITOR_SCHEMA, file_editor
 from src.tools.file_read import FILE_READ_SCHEMA, file_read
 from src.tools.file_write import FILE_WRITE_SCHEMA, file_write
 from src.tools.insert_after_line import INSERT_AFTER_LINE_SCHEMA, insert_after_line
+from src.tools.line_edit_tool import LINE_EDIT_SCHEMA, line_edit
 
 
 class _StubSandbox:
@@ -69,7 +70,7 @@ class _StubSandbox:
 
 def test_tool_schemas_present():
     names = {s["function"]["name"] for s in TOOL_SCHEMAS}
-    assert names == {"file_write", "file_read", "file_editor", "insert_after_line"}
+    assert names == {"file_write", "file_read", "file_editor", "line_edit", "insert_after_line"}
 
 
 def test_file_write_schema_shape():
@@ -88,6 +89,12 @@ def test_file_editor_schema_shape():
     fn = FILE_EDITOR_SCHEMA["function"]
     assert fn["name"] == "file_editor"
     assert set(fn["parameters"]["required"]) == {"file_path", "old_string", "new_string"}
+
+
+def test_line_edit_schema_shape():
+    fn = LINE_EDIT_SCHEMA["function"]
+    assert fn["name"] == "line_edit"
+    assert set(fn["parameters"]["required"]) == {"file_path", "old_string_line_numbers", "new_string"}
 
 
 def test_insert_after_line_schema_shape():
@@ -224,6 +231,133 @@ def test_file_editor_old_string_missing_returns_error():
     asyncio.run(_run())
 
 
+def test_line_edit_requires_prior_read():
+    stub = _StubSandbox()
+
+    async def _run():
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="alpha\nbeta\ngamma",
+        )
+        result = await line_edit(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            old_string_line_numbers="2",
+            new_string="delta",
+            execution_context={"read_files": set()},
+        )
+        assert result["ok"] is False
+        assert "must call file_read" in result["result"].lower()
+
+    asyncio.run(_run())
+
+
+def test_line_edit_single_line_success():
+    stub = _StubSandbox()
+
+    async def _run():
+        context = {"read_files": {"/home/user/a.txt"}}
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="alpha\nbeta\ngamma",
+        )
+        result = await line_edit(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            old_string_line_numbers="2",
+            new_string="delta",
+            execution_context=context,
+        )
+        assert result["ok"] is True
+        assert stub.store["/home/user/a.txt"] == "alpha\ndelta\ngamma"
+
+    asyncio.run(_run())
+
+
+def test_line_edit_range_success():
+    stub = _StubSandbox()
+
+    async def _run():
+        context = {"read_files": {"/home/user/a.txt"}}
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="alpha\nbeta\ngamma\nomega",
+        )
+        result = await line_edit(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            old_string_line_numbers="2-3",
+            new_string="delta\nepsilon",
+            execution_context=context,
+        )
+        assert result["ok"] is True
+        assert stub.store["/home/user/a.txt"] == "alpha\ndelta\nepsilon\nomega"
+
+    asyncio.run(_run())
+
+
+def test_line_edit_invalid_range_returns_structured_error():
+    stub = _StubSandbox()
+
+    async def _run():
+        context = {"read_files": {"/home/user/a.txt"}}
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="alpha\nbeta",
+        )
+        result = await line_edit(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            old_string_line_numbers="5-7",
+            new_string="delta",
+            execution_context=context,
+        )
+        assert result["ok"] is False
+        assert "was not found" in result["result"].lower()
+
+    asyncio.run(_run())
+
+
+def test_line_edit_missing_file_returns_structured_error():
+    stub = _StubSandbox()
+
+    async def _run():
+        context = {"read_files": {"/home/user/missing.txt"}}
+        result = await line_edit(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/missing.txt",
+            old_string_line_numbers="1",
+            new_string="delta",
+            execution_context=context,
+        )
+        assert result["ok"] is False
+        assert "does not exist" in result["result"].lower() or "could not be read" in result["result"].lower()
+
+    asyncio.run(_run())
+
+
 def test_insert_after_line_success():
     stub = _StubSandbox()
 
@@ -331,6 +465,52 @@ def test_execute_tool_tracks_reads_for_editor():
             )
             assert edit_result["ok"] is True
             assert stub.store["/home/user/a.txt"] == "after"
+        finally:
+            tools_mod.sandbox_service = original
+
+    asyncio.run(_run())
+
+
+def test_execute_tool_dispatches_line_edit_after_read():
+    stub = _StubSandbox()
+
+    async def _run():
+        context = {"read_files": set()}
+        await file_write(
+            stub,
+            sandbox_id="sb",
+            e2b_api_key="k",
+            file_path="/home/user/a.txt",
+            content="alpha\nbeta\ngamma",
+        )
+
+        import src.tools as tools_mod
+
+        original = tools_mod.sandbox_service
+        tools_mod.sandbox_service = stub
+        try:
+            read_result = await execute_tool(
+                "file_read",
+                {"file_path": "/home/user/a.txt"},
+                sandbox_id="sb",
+                e2b_api_key="k",
+                execution_context=context,
+            )
+            assert read_result["ok"] is True
+
+            result = await execute_tool(
+                "line_edit",
+                {
+                    "file_path": "/home/user/a.txt",
+                    "old_string_line_numbers": "2",
+                    "new_string": "delta",
+                },
+                sandbox_id="sb",
+                e2b_api_key="k",
+                execution_context=context,
+            )
+            assert result["ok"] is True
+            assert stub.store["/home/user/a.txt"] == "alpha\ndelta\ngamma"
         finally:
             tools_mod.sandbox_service = original
 

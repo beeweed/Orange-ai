@@ -15,12 +15,14 @@ from src.tools.edit_tool import FILE_EDITOR_SCHEMA, file_editor
 from src.tools.file_read import FILE_READ_SCHEMA, file_read
 from src.tools.file_write import FILE_WRITE_SCHEMA, file_write
 from src.tools.insert_after_line import INSERT_AFTER_LINE_SCHEMA, insert_after_line
+from src.tools.line_edit_tool import LINE_EDIT_SCHEMA, line_edit
 
 # Native tool schemas passed directly to the LLM `tools` parameter.
 TOOL_SCHEMAS: list[dict] = [
     FILE_WRITE_SCHEMA,
     FILE_READ_SCHEMA,
     FILE_EDITOR_SCHEMA,
+    LINE_EDIT_SCHEMA,
     INSERT_AFTER_LINE_SCHEMA,
 ]
 
@@ -64,6 +66,14 @@ async def execute_tool(
             sandbox_service,
             sandbox_id=sandbox_id,
             e2b_api_key=e2b_api_key,
+            **arguments,
+        )
+    if name == "line_edit":
+        return await line_edit(
+            sandbox_service,
+            sandbox_id=sandbox_id,
+            e2b_api_key=e2b_api_key,
+            execution_context=execution_context,
             **arguments,
         )
     if name == "insert_after_line":
